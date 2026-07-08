@@ -1,0 +1,6 @@
+streamlit
+openpyxl
+openai
+python-docx
+python-pptx
+reportlab
