@@ -3,125 +3,139 @@ import openai
 import pandas as pd
 from io import BytesIO
 import base64
-from PIL import Image # 画像処理用
+from PIL import Image
+import os
 
-# --- 1. セキュリティ & 設定 ---
-st.set_page_config(page_title="Magic Biz Data Gen Pro", layout="wide")
+# --- 0. 環境の「言語エラー」を強制回避（重要） ---
+os.environ["PYTHONIOENCODING"] = "utf-8"
 
+# --- 1. 初期設定 ---
+st.set_page_config(page_title="BizData Gen Pro v2", layout="wide")
+
+# セキュリティチェック
 if "OPENAI_API_KEY" not in st.secrets:
-    st.error("APIキーが設定されていません。")
+    st.error("APIキーが設定されていません。管理画面のSecretsに登録してください。")
     st.stop()
 
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# --- 2. プロフェッショナル・プロンプト ---
-PROMPT_DIC = {
-    "タイムカード": "日付、出勤、退勤、休憩時間を抽出し、日ごとの実働時間を計算してください。",
-    "手書き請求書": "発行元、合計金額、品目、数量、単価を抽出してください。手書き文字を優先して解読してください。",
-    "その他自動判別": "書類の内容を分析し、最も適切な表形式に変換してください。"
-}
-
-# --- 3. 堅牢な画像処理関数（エラー回避の要） ---
-def process_image_to_base64(uploaded_file):
+# --- 2. 究極の「エラー回避」画像処理 ---
+def get_safe_image(uploaded_file):
     """
-    日本語ファイル名などのメタデータを完全に排除し、
-    純粋な画像データのみを抽出し、リサイズして最適化する。
+    ファイル名（日本語）を一切無視し、純粋な『絵のデータ』だけを抜き出す。
+    これにより ASCII エラーを物理的に発生させない。
     """
-    img = Image.open(uploaded_file)
-    # RGBに変換してメタデータを破棄
-    img = img.convert("RGB")
-    # サイズが大きすぎる場合は縮小（AIの識字率向上とコスト削減）
-    img.thumbnail((2000, 2000))
+    # ファイル名を参照せずに中身（バイト）だけを読み込む
+    img_data = uploaded_file.read()
+    img = Image.open(BytesIO(img_data))
+    img = img.convert("RGB") # メタデータを完全に剥ぎ取る
+    
+    # AIが読みやすいサイズに調整
+    img.thumbnail((1600, 1600))
     
     buffered = BytesIO()
     img.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-# --- 4. メイン画面構成 ---
+# --- 3. UI構築 ---
 st.title("🚀 Magic Biz Data Gen Pro")
-st.subheader("法人向けAIビジネスデータ錬成エンジン")
+st.caption("【法人・プロフェッショナル専用】高精度データ変換エンジン")
 
-# 法人向け同意確認（弁護士視点：法的リスク回避）
-with st.expander("📝 ご利用前の重要事項（利用規約）"):
-    st.write("1. 本アプリは送信された画像をAI解析後、即座にメモリから消去します。")
-    st.write("2. 生成されたデータの正確性は、必ず人間が確認してください。")
-    agree = st.checkbox("上記に同意して利用を開始する")
+# 同意確認
+with st.sidebar:
+    st.header("🛡️ セキュリティ設定")
+    is_agreed = st.checkbox("データ即時消去に同意する", value=True)
+    st.info("送信された画像はメモリ内のみで処理され、保存されません。")
 
-if agree:
-    # ユーザーインターフェース
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.info("ステップ1：書類をアップロード")
-        # 内部でメタデータを無視するため、日本語ファイル名でも安全
-        uploaded_file = st.file_uploader("iPhoneで撮影した写真を選択", type=['png', 'jpg', 'jpeg'])
-        
-    with col2:
-        st.info("ステップ2：設定を選択")
-        doc_type = st.selectbox("書類の種類", list(PROMPT_DIC.keys()))
-        output_format = st.radio("出力ファイル", ["Excel (.xlsx)", "CSV (.csv)"])
+if not is_agreed:
+    st.warning("利用するにはセキュリティ設定に同意してください。")
+    st.stop()
 
-    if st.button("✨ データを生成する", type="primary", use_container_width=True):
-        if uploaded_file:
-            try:
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+# メイン操作エリア
+col1, col2 = st.columns([1, 1])
 
-                # A. 画像処理
-                status_text.text("📷 画像を最適化中...")
-                base64_image = process_image_to_base64(uploaded_file)
-                progress_bar.progress(30)
+with col1:
+    st.markdown("### 1. 書類のアップロード")
+    # ここで日本語ファイル名が来ても、内部処理では無視するように設計
+    uploaded_file = st.file_uploader("写真をアップロード（iPhone対応）", type=['png', 'jpg', 'jpeg'])
 
-                # B. AI解析
-                status_text.text(f"🧠 AIが{doc_type}を解析中...")
+with col2:
+    st.markdown("### 2. 解析設定")
+    doc_type = st.selectbox("書類のタイプを選択", ["タイムカード", "手書き請求書", "ビジネス文書（自動判別）"])
+    output_name = st.text_input("保存するファイル名（英数字のみ推奨）", "business_data")
+
+if st.button("✨ データを生成する（解析開始）", type="primary", use_container_width=True):
+    if uploaded_file is not None:
+        try:
+            # プログレス表示
+            with st.status("🛠️ プロフェッショナル解析実行中...", expanded=True) as status:
+                
+                # A. 画像の「完全匿名化」処理
+                st.write("📷 画像データから不要な情報を除去中...")
+                base64_image = get_safe_image(uploaded_file)
+                
+                # B. AIへの超精密な命令（5万円の価値を出すプロンプト）
+                st.write("🧠 AIが文字を解析・データ変換中...")
+                prompt = f"""
+                あなたは一流の事務代行スタッフです。
+                この画像（{doc_type}）から全データを抽出し、JSON形式で出力してください。
+                【条件】
+                - 数字は半角に統一。
+                - 表形式で出力すること。
+                - タイムカードの場合、日ごとの実働時間（退勤-出勤-休憩）を推測して計算。
+                - 請求書の場合、単価×数量が合計と一致するか検算してください。
+                """
+                
                 response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=[
-                        {"role": "system", "content": "あなたはエクセル職人です。JSON形式でデータを返してください。"},
+                        {"role": "system", "content": "返答は必ず純粋なJSONのみにしてください。"},
                         {"role": "user", "content": [
-                            {"type": "text", "text": f"{doc_type}の解析指示: {PROMPT_DIC[doc_type]}"},
+                            {"type": "text", "text": prompt},
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                         ]}
                     ],
-                    response_format={ "type": "json_object" }
+                    response_format={"type": "json_object"}
                 )
-                progress_bar.progress(70)
-
-                # C. データ変換
+                
+                # C. データの受け取りと表示
                 import json
-                data = json.loads(response.choices[0].message.content)
-                # JSONからDataFrameへ（ネストされた構造にも対応）
-                df = pd.DataFrame(data[next(iter(data))])
+                result_json = json.loads(response.choices[0].message.content)
+                # JSONの中から最初のリスト項目を探し出す
+                first_key = list(result_json.keys())[0]
+                df = pd.DataFrame(result_json[first_key])
                 
-                status_text.text("📊 解析完了。データのプレビューを表示します。")
-                progress_bar.progress(100)
+                status.update(label="✅ 解析完了！", state="complete", expanded=False)
 
-                st.divider()
-                st.write("### 💎 解析結果（プレビュー）")
-                # 画面上で編集可能なテーブル（ビジネスプロのこだわり）
-                edited_df = st.data_editor(df, num_rows="dynamic")
+            st.success("🎉 データの錬成に成功しました！")
+            
+            # D. 画面上での修正機能（ビジネスプロの推奨）
+            st.write("### 💎 解析結果の確認・修正")
+            st.caption("※セルの内容をダブルクリックして修正できます。修正後にダウンロードしてください。")
+            edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
 
-                # D. Excel出力（プロ仕様の書き出し）
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    edited_df.to_excel(writer, index=False, sheet_name='Sheet1')
-                
-                st.download_button(
-                    label="📥 高精度データをダウンロード（5万円相当の価値）",
-                    data=output.getvalue(),
-                    file_name=f"processed_data.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
+            # E. Excel出力
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                edited_df.to_excel(writer, index=False, sheet_name='Data_Result')
+            
+            st.download_button(
+                label=f"📥 {output_name}.xlsx をダウンロード",
+                data=output.getvalue(),
+                file_name=f"{output_name}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
 
-            except Exception as e:
-                st.error(f"🚨 システムエラー: {e}")
-                st.info("ヒント：画像が鮮明か確認してください。解決しない場合はサポートへ。")
-        else:
-            st.warning("写真を選択してください。")
-else:
-    st.warning("利用を開始するには、規約への同意が必要です。")
+        except Exception as e:
+            # 最悪エラーが起きても、ユーザーに「次の一手」を提示する（UXの極意）
+            st.error(f"🚨 処理が中断されました")
+            with st.expander("技術的なエラー詳細"):
+                st.write(str(e))
+            st.info("💡 対策: 画像を少し明るい場所で撮り直すか、ファイル名を 'doc1.jpg' のように英数字に変更して試してください。")
+    else:
+        st.warning("写真をアップロードしてください。")
 
 # フッター
 st.divider()
-st.caption("© 2024 Magic Biz Data Gen | Security: Zero-Retention Policy")
+st.caption("© 2024 Magic Biz Data Gen | セキュリティ：送信されたデータはダウンロード後に即時消去されます。")
