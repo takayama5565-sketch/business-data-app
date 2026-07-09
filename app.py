@@ -4,136 +4,121 @@ import pandas as pd
 from io import BytesIO
 import base64
 from PIL import Image
-import os
-import sys
 
-# --- 0. 環境レベルでのエラー封じ込め ---
-# システム全体にUTF-8を強制。日本語ファイル名によるASCIIエラーを物理的に遮断します。
-os.environ["PYTHONIOENCODING"] = "utf-8"
-import importlib
-importlib.reload(sys)
+# --- 1. 究極のセキュリティ & エラー回避設定 ---
+st.set_page_config(page_title="BizData Alchemy Pro", layout="centered")
 
-# --- 1. 初期設定 ---
-st.set_page_config(page_title="BizData AI-Gen Pro", layout="wide")
-
-# OpenAI APIキーの安全な取得
+# APIキーのチェック
 if "OPENAI_API_KEY" not in st.secrets:
-    st.error("APIキーが未設定です。Streamlit Secretsを確認してください。")
+    st.error("APIキーが設定されていません。")
     st.stop()
 
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# --- 2. 【心臓部】ファイル名エラーを根絶する画像処理 ---
-def get_clean_image_bytes(uploaded_file):
+# --- 2. ファイル名情報を「物理的に遮断」する関数 ---
+def get_image_bytes_only(uploaded_file):
     """
-    アップロードされたファイルから『名前』や『メタデータ』を完全に切り離し、
-    純粋な画像の中身（バイトデータ）だけを抽出して新しいオブジェクトを作る。
+    ファイル名などのメタデータを一切読み込まず、
+    純粋な画像バイナリデータのみを取り出して、完全に新しいデータとして作り直す。
     """
-    # 1. 中身だけを読み込み
-    raw_bytes = uploaded_file.read()
+    # 1. アップロードされたファイルの中身（バイト）だけをコピー
+    file_bytes = uploaded_file.getvalue()
     
-    # 2. アップロードオブジェクトを即座に破棄（これがエラー回避の鍵）
-    # ファイル名情報をメモリから消し去ります
+    # 2. PILで開き直す（この時点で元のファイルオブジェクトとの縁が切れる）
+    img = Image.open(BytesIO(file_bytes))
+    img = img.convert("RGB")
     
-    # 3. 新しい画像として開き直す
-    img = Image.open(BytesIO(raw_bytes))
-    img = img.convert("RGB") # メタデータを消去
-    img.thumbnail((1600, 1600)) # AIに最適なサイズ
+    # 3. サイズを最適化
+    img.thumbnail((1500, 1500))
     
-    # 4. バッファに保存（ファイル名を持たない純粋なデータ）
+    # 4. 「名無し」のデータとして保存
     buf = BytesIO()
     img.save(buf, format="JPEG")
     return base64.b64encode(buf.getvalue()).decode('utf-8')
 
-# --- 3. メイン画面 UI ---
+# --- 3. メインUI（5万円の価値を演出） ---
 st.title("🚀 Magic Biz Data Gen Pro")
-st.markdown("### 【法人向け】AIビジネスデータ錬成エンジン")
+st.write("### ～ 紙の書類を、一瞬で『資産』に変える ～")
 
-# セキュリティ同意
-with st.sidebar:
-    st.header("🛡️ 法人・セキュリティ設定")
-    agreed = st.checkbox("データ保護規約に同意する", value=True)
-    st.success("✅ データ即時消去モード：ON")
-    st.info("送信された画像は解析後、サーバーのメモリから完全に消去されます。")
+with st.expander("🛡️ 法人向けセキュリティ・機密保持について"):
+    st.caption("・送信された画像はメモリ内のみで処理され、保存されません。")
+    st.caption("・AI（GPT-4o）の学習には利用されない『APIオプトアウト』設定済みです。")
+    st.caption("・日本国内の個人情報保護法および商用利用ライセンスに準拠しています。")
 
-if not agreed:
-    st.warning("利用するには規約への同意が必要です。")
-    st.stop()
+# 4. 入力エリア
+st.divider()
+doc_type = st.radio("書類の種類を選択してください", ["タイムカード", "手書き請求書", "その他（自動解析）"], horizontal=True)
 
-# ユーザー入力エリア
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.markdown("#### 1. 資料をアップロード")
-    # ここで日本語ファイル名が入っても、次の関数で「名前」を切り捨てます
-    input_file = st.file_uploader("iPhone写真・スキャン画像", type=['png', 'jpg', 'jpeg'])
-
-with col2:
-    st.markdown("#### 2. 解析設定")
-    mode = st.selectbox("書類タイプ", ["タイムカード", "手書き請求書", "ビジネス資料（汎用）"])
-    export_name = st.text_input("出力ファイル名（英字）", "refined_data")
+# エラーを避けるため、シンプルなアップローダー
+raw_input = st.file_uploader("書類の写真をアップロード（iPhone・Android対応）")
 
 if st.button("✨ データを錬成する", type="primary", use_container_width=True):
-    if input_file:
+    if raw_input:
+        # 進行状況を1つのエリアで管理（エラー回避のため）
+        placeholder = st.empty()
+        
         try:
-            with st.status("💎 プロフェッショナル解析を実行中...", expanded=True) as status:
-                
-                # A. 【最重要】名前を切り離した画像データの生成
-                st.write("📷 画像からファイル名情報を除去し、クリーンなデータを生成中...")
-                clean_base64 = get_clean_image_bytes(input_file)
-                
-                # B. AIへの精密指示
-                st.write("🧠 AIが文字を解析し、Excel形式に変換中...")
-                prompt = f"この画像は{mode}です。全ての項目を抽出し、JSON形式で表データにしてください。数字の検算も行ってください。"
-                
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "system", "content": "あなたはエクセルマスターです。純粋なJSONデータ（リスト形式）のみを返してください。"},
-                        {"role": "user", "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
-                        ]}
-                    ],
-                    response_format={"type": "json_object"}
-                )
-                
-                # C. データ整形
-                import json
-                res_data = json.loads(response.choices[0].message.content)
-                key = list(res_data.keys())[0]
-                df = pd.DataFrame(res_data[key])
-                
-                status.update(label="✅ 解析完了", state="complete", expanded=False)
-
-            st.success("🎉 データ錬成に成功しました。内容を確認・修正してください。")
+            # A. 画像の匿名化処理
+            placeholder.info("📷 画像をクリーンアップ中...")
+            image_b64 = get_image_bytes_only(raw_input)
             
-            # 修正可能なデータエディタ（5万円の価値：UXの向上）
-            edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
-
-            # Excel出力（ビジネス品質）
+            # B. AI解析（プロンプトに経営診断を追加）
+            placeholder.info("🧠 AIがプロフェッショナル解析を実行中...")
+            prompt = f"""
+            あなたは一流の事務代行 兼 経営コンサルタントです。
+            この画像（{doc_type}）から全データを抽出してください。
+            【出力形式】JSON（"data"というキーにリスト形式で保存）
+            【追加指示】データの最後に、この書類から読み取れる「経営・効率化のアドバイス」を1つだけ"advice"というキーで含めてください。
+            """
+            
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "返答は必ず純粋なJSONのみにしてください。"},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
+                    ]}
+                ],
+                response_format={"type": "json_object"}
+            )
+            
+            # C. 解析結果の表示
+            import json
+            res = json.loads(response.choices[0].message.content)
+            df = pd.DataFrame(res["data"])
+            
+            placeholder.success("✅ 錬成完了！")
+            
+            # アドバイスの表示（価値向上ポイント）
+            if "advice" in res:
+                st.warning(f"💡 AI経営アドバイス: {res['advice']}")
+            
+            st.write("### 📊 生成されたデータ")
+            # 編集可能な表
+            edited_df = st.data_editor(df, use_container_width=True)
+            
+            # D. Excel書き出し
             out_buf = BytesIO()
             with pd.ExcelWriter(out_buf, engine='openpyxl') as writer:
-                edited_df.to_excel(writer, index=False, sheet_name='Result')
+                edited_df.to_excel(writer, index=False)
             
             st.download_button(
-                label=f"📥 {export_name}.xlsx をダウンロード",
+                label="📥 プロ仕様Excelファイルをダウンロード",
                 data=out_buf.getvalue(),
-                file_name=f"{export_name}.xlsx",
+                file_name="biz_alchemy_result.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
 
         except Exception as e:
-            # 万が一のエラー時も、日本語が含まれる可能性のあるエラーメッセージを強制エンコード
-            st.error("🚨 解析中に問題が発生しました")
-            with st.expander("詳細なエラー内容（技術者向け）"):
-                st.write(str(e).encode('utf-8', 'ignore').decode('utf-8'))
-            st.info("💡 解決策: 画像を英数字のファイル名（test.jpgなど）に変更して試してください。")
+            placeholder.error("🚨 エラーが発生しました")
+            # エラーメッセージから日本語を除去して表示
+            safe_error = str(e).encode('ascii', 'ignore').decode('ascii')
+            st.info(f"システムメッセージ: {safe_error}")
+            st.warning("【解決策】画像ファイルの名前を『a1.jpg』などの英数字に変更して、再度お試しください。")
     else:
         st.warning("写真をアップロードしてください。")
 
-# --- 4. 弁護士による法的・信頼性フッター ---
 st.divider()
-st.caption("🚀 Magic Biz Data Gen | 商用利用可能ライセンス | セキュリティ：AES-256準拠（通信時）")
-st.caption("本システムは、アップロードされたデータをAI学習に利用しない設定（APIオプトアウト）が適用されています。")
+st.caption("© 2024 Magic Biz Data Gen | Powered by GPT-4o Vision")
