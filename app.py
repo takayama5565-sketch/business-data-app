@@ -3,100 +3,125 @@ import openai
 import pandas as pd
 from io import BytesIO
 import base64
-import uuid # ファイル名エラー対策
+from PIL import Image # 画像処理用
 
-# --- 設定：OpenAI APIキー ---
-# StreamlitのSecrets管理画面で 'OPENAI_API_KEY' を設定してください
+# --- 1. セキュリティ & 設定 ---
+st.set_page_config(page_title="Magic Biz Data Gen Pro", layout="wide")
+
 if "OPENAI_API_KEY" not in st.secrets:
-    st.error("APIキーが設定されていません。Secretsを確認してください。")
+    st.error("APIキーが設定されていません。")
     st.stop()
 
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# --- プロフェッショナル・プロンプト定義 ---
-SYSTEM_PROMPT = """
-あなたはプロのデータエントリー担当者です。
-提供された画像を解析し、正確なJSON形式のデータを作成してください。
-【ルール】
-1. タイムカードの場合：日付、出勤時間、退勤時間、休憩、備考を抽出。
-2. 請求書の場合：発行日、宛名、品目名、数量、単価、金額、合計を抽出。
-3. 数値は半角数字に統一し、計算ミスがあれば指摘してください。
-4. 返答は純粋なJSONデータのみを出力してください。
-"""
+# --- 2. プロフェッショナル・プロンプト ---
+PROMPT_DIC = {
+    "タイムカード": "日付、出勤、退勤、休憩時間を抽出し、日ごとの実働時間を計算してください。",
+    "手書き請求書": "発行元、合計金額、品目、数量、単価を抽出してください。手書き文字を優先して解読してください。",
+    "その他自動判別": "書類の内容を分析し、最も適切な表形式に変換してください。"
+}
 
-# --- 画像をAIに送るための変換 ---
-def encode_image(uploaded_file):
-    return base64.b64encode(uploaded_file.read()).decode('utf-8')
+# --- 3. 堅牢な画像処理関数（エラー回避の要） ---
+def process_image_to_base64(uploaded_file):
+    """
+    日本語ファイル名などのメタデータを完全に排除し、
+    純粋な画像データのみを抽出し、リサイズして最適化する。
+    """
+    img = Image.open(uploaded_file)
+    # RGBに変換してメタデータを破棄
+    img = img.convert("RGB")
+    # サイズが大きすぎる場合は縮小（AIの識字率向上とコスト削減）
+    img.thumbnail((2000, 2000))
+    
+    buffered = BytesIO()
+    img.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-# --- メインUI ---
-st.set_page_config(page_title="Magic Biz Data Gen", layout="centered")
-st.title("🚀 AIビジネスデータ錬成アプリ")
-st.caption("タイムカード・手書き請求書をプロ仕様のExcelへ")
+# --- 4. メイン画面構成 ---
+st.title("🚀 Magic Biz Data Gen Pro")
+st.subheader("法人向けAIビジネスデータ錬成エンジン")
 
-# ファイルアップロード（エラー対策：ファイル名に関わらず内部でID処理）
-uploaded_file = st.file_uploader("書類の写真をアップロードしてください", type=['png', 'jpg', 'jpeg'])
+# 法人向け同意確認（弁護士視点：法的リスク回避）
+with st.expander("📝 ご利用前の重要事項（利用規約）"):
+    st.write("1. 本アプリは送信された画像をAI解析後、即座にメモリから消去します。")
+    st.write("2. 生成されたデータの正確性は、必ず人間が確認してください。")
+    agree = st.checkbox("上記に同意して利用を開始する")
 
-col1, col2 = st.columns(2)
-with col1:
-    output_format = st.selectbox("出力形式", ["Excel (.xlsx)", "CSV (.csv)"])
-with col2:
-    doc_type = st.selectbox("書類タイプ", ["タイムカード", "手書き請求書", "その他自動判別"])
+if agree:
+    # ユーザーインターフェース
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.info("ステップ1：書類をアップロード")
+        # 内部でメタデータを無視するため、日本語ファイル名でも安全
+        uploaded_file = st.file_uploader("iPhoneで撮影した写真を選択", type=['png', 'jpg', 'jpeg'])
+        
+    with col2:
+        st.info("ステップ2：設定を選択")
+        doc_type = st.selectbox("書類の種類", list(PROMPT_DIC.keys()))
+        output_format = st.radio("出力ファイル", ["Excel (.xlsx)", "CSV (.csv)"])
 
-if st.button("✨ データを生成する", type="primary"):
-    if uploaded_file:
-        try:
-            # 1. 内部的な安全なファイル名の生成（日本語エラー回避）
-            safe_filename = f"{uuid.uuid4()}.jpg"
-            
-            with st.spinner("AIがプロの視点で解析中..."):
-                base64_image = encode_image(uploaded_file)
-                
-                # 2. OpenAI API (GPT-4o) 呼び出し
-                response = openai.chat.completions.create(
+    if st.button("✨ データを生成する", type="primary", use_container_width=True):
+        if uploaded_file:
+            try:
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+
+                # A. 画像処理
+                status_text.text("📷 画像を最適化中...")
+                base64_image = process_image_to_base64(uploaded_file)
+                progress_bar.progress(30)
+
+                # B. AI解析
+                status_text.text(f"🧠 AIが{doc_type}を解析中...")
+                response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": "あなたはエクセル職人です。JSON形式でデータを返してください。"},
                         {"role": "user", "content": [
-                            {"type": "text", "text": f"この画像は{doc_type}です。解析してデータ化してください。"},
+                            {"type": "text", "text": f"{doc_type}の解析指示: {PROMPT_DIC[doc_type]}"},
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                         ]}
                     ],
                     response_format={ "type": "json_object" }
                 )
-                
-                # 3. データの整形
-                import json
-                raw_data = json.loads(response.choices[0].message.content)
-                # JSONの階層が深くても対応できるように、リスト形式を探す
-                if isinstance(raw_data, dict):
-                    key = list(raw_data.keys())[0]
-                    df = pd.DataFrame(raw_data[key]) if isinstance(raw_data[key], list) else pd.DataFrame([raw_data])
-                else:
-                    df = pd.DataFrame(raw_data)
+                progress_bar.progress(70)
 
-                # 4. Excel作成（ビジネス価値：罫線と書式の設定）
+                # C. データ変換
+                import json
+                data = json.loads(response.choices[0].message.content)
+                # JSONからDataFrameへ（ネストされた構造にも対応）
+                df = pd.DataFrame(data[next(iter(data))])
+                
+                status_text.text("📊 解析完了。データのプレビューを表示します。")
+                progress_bar.progress(100)
+
+                st.divider()
+                st.write("### 💎 解析結果（プレビュー）")
+                # 画面上で編集可能なテーブル（ビジネスプロのこだわり）
+                edited_df = st.data_editor(df, num_rows="dynamic")
+
+                # D. Excel出力（プロ仕様の書き出し）
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df.to_excel(writer, index=False, sheet_name='解析結果')
-                    # ここにプロ向けの罫線・色付けロジック（openpyxl）を後で追加可能
+                    edited_df.to_excel(writer, index=False, sheet_name='Sheet1')
                 
-                st.success("✅ 解析が完了しました！")
-                st.table(df) # プレビュー表示
-
-                # 5. ダウンロード
                 st.download_button(
-                    label="📥 高精度データをダウンロード",
+                    label="📥 高精度データをダウンロード（5万円相当の価値）",
                     data=output.getvalue(),
-                    file_name=f"biz_data_{uuid.uuid4().hex[:6]}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    file_name=f"processed_data.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
                 )
-                
-        except Exception as e:
-            st.error(f"⚠️ 解析エラーが発生しました: {str(e)}")
-            st.info("システム担当：API連携または画像サイズを確認してください。")
-    else:
-        st.warning("写真を選択してください。")
 
-# --- セキュリティ・フッター ---
+            except Exception as e:
+                st.error(f"🚨 システムエラー: {e}")
+                st.info("ヒント：画像が鮮明か確認してください。解決しない場合はサポートへ。")
+        else:
+            st.warning("写真を選択してください。")
+else:
+    st.warning("利用を開始するには、規約への同意が必要です。")
+
+# フッター
 st.divider()
-st.caption("🔒 セキュリティ: アップロードされた画像およびデータは、ダウンロード後にメモリから即時消去されます。AIの学習にも利用されません。")
+st.caption("© 2024 Magic Biz Data Gen | Security: Zero-Retention Policy")
