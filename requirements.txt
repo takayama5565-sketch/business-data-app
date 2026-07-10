@@ -1,7 +1,6 @@
-streamlit
-openpyxl
-openai
+google-generativeai
 python-docx
 python-pptx
 reportlab
-Pillow
+openpyxl
+pillow-heif
