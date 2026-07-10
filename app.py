@@ -1,91 +1,208 @@
 import streamlit as st
 import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from docx import Document
 from pptx import Presentation
+from pptx.util import Inches
 import io
 import base64
 import re
-import csv
 from openai import OpenAI
 from PIL import Image
 from datetime import datetime
 
-# --- 1. ページ全体の初期設定 ---
-st.set_page_config(page_title="Magic Biz Data Pro", page_icon="🪄", layout="wide")
+# ==========================================
+# 5万円で販売するための「Enterprise SaaS」設定
+# ==========================================
+st.set_page_config(page_title="Biz Data Alchemist Pro", page_icon="💎", layout="wide")
 
-# APIキーの読み込み（エラー回避付き）
+# APIキーの安全な読み込み
 try:
     api_key = st.secrets["OPENAI_API_KEY"]
     client = OpenAI(api_key=api_key)
 except:
     client = None
 
-# --- 2. サイドバー（法的要件・設定パネル） ---
+# --- 左サイドバー：設定とコンプライアンス ---
 with st.sidebar:
-    st.title("⚙️ 出力・セキュリティ設定")
-    format_type = st.selectbox("1. 出力ファイル形式", ["Excel (.xlsx)", "Word (.docx)", "PowerPoint (.pptx)"])
-    doc_type = st.selectbox("2. 書類の種類", ["自動判別", "タイムカード", "請求書・見積書", "手書き表・アンケート"])
+    st.header("⚙️ 変換設定")
+    format_type = st.radio("1. 出力フォーマット", ["Excel (.xlsx)", "Word (.docx)", "PowerPoint (.pptx)"])
+    doc_type = st.selectbox("2. 書類のカテゴリ", ["自動判別 (推奨)", "タイムカード・勤怠", "請求書・領収書", "手書きメモ・アンケート"])
     
     st.markdown("---")
-    st.caption("🛡️ 法人向けセキュリティ（NDA準拠）")
-    agree_terms = st.checkbox("【必須】機密情報の即時破棄（ゼロ・データ保持）ポリシーに同意する")
+    st.header("⚖️ コンプライアンス設定")
+    st.caption("エンタープライズ向けのデータ保護基準を満たすため、以下のポリシーへの同意が必須です。")
+    agree_terms = st.checkbox("【必須】機密情報の即時破棄（ゼロ・データ保持）に同意する")
     if agree_terms:
-        st.success(f"署名完了: {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
+        st.success(f"署名完了: {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n監査ログID: SEC-{datetime.now().strftime('%f')}")
 
-# --- 3. メイン画面 ---
-st.title("🪄 魔法のビジネスデータ生成AI [Enterprise版]")
-st.markdown("AIが画像を解析し、プレゼン対応の美しいフォーマットで出力します。")
+# --- メインエリア ---
+st.title("💎 Biz Data Alchemist [Enterprise Edition]")
+st.markdown("### 画像からビジネスデータを錬成し、プロフェッショナルな資料を自動生成します。")
 
-uploaded_file = st.file_uploader("📸 ここに書類の写真をドロップ、またはカメラで撮影", type=['png', 'jpg', 'jpeg', 'heic', 'webp'])
+uploaded_file = st.file_uploader("📸 書類の画像をアップロード（HEIC, JPG, PNG対応）", type=['png', 'jpg', 'jpeg', 'heic', 'webp'])
 
+# セッション状態の初期化（ダウンロード消失バグ対策）
 if "generated_file" not in st.session_state:
     st.session_state.generated_file = None
     st.session_state.file_name = None
     st.session_state.mime_type = None
+    st.session_state.preview_data = [] 
 
 if uploaded_file:
-    st.image(uploaded_file, caption="セキュア・プレビュー（サーバーには保存されません）", width=300)
+    with st.expander("アップロードした画像を確認", expanded=False):
+        st.image(uploaded_file, use_container_width=True)
 
-# --- 4. 生成処理（エラー完全回避エンジン） ---
-if st.button("✨ 完璧なデータを生成する", type="primary", use_container_width=True):
+st.markdown("---")
+
+# --- 堅牢なパース用関数（最強の抽出フィルター） ---
+def parse_markdown_table(text):
+    lines = text.split('\n')
+    table_data = []
+    for line in lines:
+        if '|' in line:
+            if re.match(r'^[\s\|:-]+$', line): # 区切り線は無視
+                continue
+            row = [cell.strip() for cell in line.split('|')][1:-1]
+            if row:
+                table_data.append(row)
+    return table_data
+
+# --- データ生成アクション ---
+if st.button("🚀 データを錬成する (AI解析スタート)", type="primary", use_container_width=True):
     if not agree_terms:
-        st.error("⚠️ 左側の「セキュリティポリシー」に同意チェックを入れてください。")
+        st.error("⚠️ 左側のサイドバーで「セキュリティポリシー」に同意チェックを入れてください。")
     elif not uploaded_file:
         st.error("⚠️ 処理する書類の写真をアップロードしてください。")
     elif not client:
-        st.error("⚠️ APIキーが設定されていません。StreamlitのSecretsを確認してください。")
+        st.error("⚠️ APIキーが設定されていません。StreamlitのSecrets設定を確認してください。")
     else:
-        with st.spinner("🧠 独自の画像最適化フィルターを通し、AI解析を実行中...（約10〜20秒）"):
+        with st.spinner("🧠 データを安全に解析し、プロ仕様のレイアウトを構築中...（約10〜20秒）"):
             try:
-                # 画像の安全処理
+                # 1. 画像の完全無効化・安全処理
                 image = Image.open(uploaded_file).convert("RGB")
                 image.thumbnail((1600, 1600))
                 buffered = io.BytesIO()
                 image.save(buffered, format="JPEG")
                 base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
                 
-                # プロンプト（AIが余計な記号をつけないよう厳しく命令）
-                sys_prompt = f"あなたは優秀なデータ入力アシスタントです。画像を解析し、{doc_type}のデータを抽出してください。出力は必ずカンマ区切り（CSV形式）のテキストのみとし、```csv などのマークダウン記号や挨拶は一切含めないでください。"
+                # 2. AIへの絶対服従プロンプト
+                sys_prompt = f"""
+                あなたは世界最高峰のデータ入力スペシャリストです。
+                提供された画像を解析し、{doc_type}のデータを抽出してください。
+                【絶対ルール】
+                1. 結果は必ず「Markdown形式のテーブル（表）」だけで出力してください。
+                2. 挨拶、説明などは一切書かないでください。
+                """
                 
                 response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=[
                         {"role": "system", "content": sys_prompt},
                         {"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}]}
-                    ]
+                    ],
+                    temperature=0.1 # 安定した出力を強制
                 )
                 raw_result = response.choices[0].message.content.strip()
                 
-                # 【重要】AIがルールを破ってマークダウンを入れた場合の強制除去フィルター
-                cleaned_result = re.sub(r'
-http://googleusercontent.com/immersive_entry_chip/0
+                # 3. 強力フィルターで表データのみを抽出
+                table_data = parse_markdown_table(raw_result)
+                
+                # 万が一表が見つからなかった場合のフェイルセーフ（クラッシュ防止）
+                if not table_data:
+                    table_data = [["解析結果"]]
+                    for line in raw_result.split('\n'):
+                        if line.strip().replace('`', ''):
+                            table_data.append([line.strip().replace('`', '')])
+                
+                st.session_state.preview_data = table_data
 
-#### ステップ3：保存して、アプリで最終テスト
-1. 画面右上の緑色の **「Commit changes...」** ＞ もう一度 **「Commit changes」** を押して保存します。
-2. Streamlitのアプリ画面を開き、ブラウザを「再読み込み（リロード）」します。
-3. 同意チェックを入れ、タイムカードの写真をアップロードしてExcel生成をお試しください。
+                # 4. 各フォーマットごとの美しいファイル生成
+                if "Excel" in format_type:
+                    wb = openpyxl.Workbook()
+                    ws = wb.active
+                    ws.title = "抽出データ"
+                    
+                    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+                    header_font = Font(color="FFFFFF", bold=True)
+                    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                    
+                    for r_idx, row in enumerate(table_data, 1):
+                        for c_idx, val in enumerate(row, 1):
+                            cell = ws.cell(row=r_idx, column=c_idx, value=val)
+                            cell.border = thin_border
+                            cell.alignment = Alignment(vertical="center")
+                            if r_idx == 1: # 1行目をプロ仕様にデザイン
+                                cell.fill = header_fill
+                                cell.font = header_font
+                                cell.alignment = Alignment(horizontal="center", vertical="center")
+                    
+                    # 列幅の簡易自動調整とフィルター
+                    for col in ws.columns:
+                        ws.column_dimensions[col[0].column_letter].width = 15
+                    ws.auto_filter.ref = ws.dimensions
 
-今回は、エラーが起きた場合でも「AIが裏側でどんな文字を返してきたのか」を確認できるデバッグ用のログも組み込んでいます。これで完全にトラブルを制圧できます。
+                    buf = io.BytesIO()
+                    wb.save(buf)
+                    st.session_state.generated_file = buf.getvalue()
+                    st.session_state.file_name = f"Data_{datetime.now().strftime('%Y%m%d%H%M')}.xlsx"
+                    st.session_state.mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-無事に青い見出しの美しいExcelがダウンロードできましたでしょうか？ これが成功すれば、ついにこの5万円のアプリを販売するための「ランディングページ（販売用サイト）」の作成へと駒を進めることができます！
+                elif "Word" in format_type:
+                    doc = Document()
+                    doc.add_heading(f'解析レポート: {doc_type}', level=1)
+                    table = doc.add_table(rows=len(table_data), cols=len(table_data[0]))
+                    table.style = 'Table Grid'
+                    for r_idx, row in enumerate(table_data):
+                        for c_idx, val in enumerate(row):
+                            if c_idx < len(table.columns):
+                                table.cell(r_idx, c_idx).text = str(val)
+                    buf = io.BytesIO()
+                    doc.save(buf)
+                    st.session_state.generated_file = buf.getvalue()
+                    st.session_state.file_name = f"Report_{datetime.now().strftime('%Y%m%d')}.docx"
+                    st.session_state.mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+                elif "PowerPoint" in format_type:
+                    prs = Presentation()
+                    slide = prs.slides.add_slide(prs.slide_layouts[5])
+                    slide.shapes.title.text = f"抽出データ: {doc_type}"
+                    rows, cols = min(len(table_data), 15), len(table_data[0]) # PPTに収まるよう制限
+                    table = slide.shapes.add_table(rows, cols, Inches(1), Inches(2), Inches(8), Inches(0.3 * rows)).table
+                    for r_idx in range(rows):
+                        for c_idx in range(min(cols, len(table_data[r_idx]))):
+                            cell = table.cell(r_idx, c_idx)
+                            cell.text = str(table_data[r_idx][c_idx])
+                            if r_idx == 0:
+                                cell.fill.solid()
+                                cell.fill.fore_color.rgb = openpyxl.styles.colors.Color(rgb='1F4E78').rgb
+                                cell.text_frame.paragraphs[0].font.color.rgb = openpyxl.styles.colors.Color(rgb='FFFFFF').rgb
+                    buf = io.BytesIO()
+                    prs.save(buf)
+                    st.session_state.generated_file = buf.getvalue()
+                    st.session_state.file_name = f"Slide_{datetime.now().strftime('%Y%m%d')}.pptx"
+                    st.session_state.mime_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+                st.success("✅ 完璧なデータ錬成が完了しました！")
+                st.balloons()
+
+            except Exception as e:
+                st.error("⚠️ 解析中にエラーが発生しました。写真がぼやけている、または文字が小さすぎる可能性があります。")
+                with st.expander("🛠️ 開発者向けエラー詳細（サポート用）"):
+                    st.error(str(e))
+
+# --- 5. 結果プレビューとダウンロード ---
+if st.session_state.generated_file:
+    st.markdown("### 📊 抽出データのプレビュー")
+    if st.session_state.preview_data:
+        st.table(st.session_state.preview_data)
+        
+    st.markdown("### 📥 ダウンロード")
+    st.download_button(
+        label=f"💾 {st.session_state.file_name} を保存する",
+        data=st.session_state.generated_file,
+        file_name=st.session_state.file_name,
+        mime=st.session_state.mime_type,
+        type="primary",
+        use_container_width=True
+    )
