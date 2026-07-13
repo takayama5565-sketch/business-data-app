@@ -53,7 +53,6 @@ if is_agreed:
                     img.thumbnail((1200, 1200))
 
                     # 2. 【プロ設計】横一列の表形式をAIに強制するプロンプト
-                    # f-stringを使わず、普通の文字列にして安全に置き換えます（これで文法エラーを物理的に根絶します）
                     prompt = """
                     Analyze this image ({doc_type}). Extract the timecard data.
                     You must structure the output as a horizontal database table.
@@ -69,7 +68,7 @@ if is_agreed:
                     Only extract dates that have stamped data. Skip blank rows.
                     """.replace("{doc_type}", doc_type)
 
-                    # 3. API通信（JSON形式を指定）
+                    # 3. API通信
                     response = client.models.generate_content(
                         model='gemini-2.5-flash',
                         contents=[prompt, img],
@@ -85,7 +84,6 @@ if is_agreed:
                     try:
                         result = json.loads(cleaned_text)
                         df = pd.DataFrame(result["data"])
-                        # カラムの順番を人間が見やすいように固定
                         df = df[["氏名", "日付", "出勤", "退勤", "合計時間"]]
                     except json.JSONDecodeError:
                         st.warning("⚠️ データの自動表作成に失敗しました。解析された生データを表示します。")
@@ -97,12 +95,14 @@ if is_agreed:
                     st.write("### 📊 解析データプレビュー")
                     st.table(df)
 
-                    # 5. CSVダウンロード（UTF-8-SIG形式でExcelに直通）
-                    csv_data = df.to_csv(index=False, encoding='utf-8-sig')
+                    # 5. 【重要：5万円の価値】Excelの文字化けを物理的に消去するバイナリ変換
+                    csv_string = df.to_csv(index=False, encoding='utf-8-sig')
+                    # 文字列ではなく、エクセル専用の「目印付きバイトデータ」に強制変換
+                    csv_bytes = csv_string.encode('utf-8-sig')
 
                     st.download_button(
                         label="📥 CSVファイル（エクセル対応）を保存する",
-                        data=csv_data,
+                        data=csv_bytes,  # バイトデータとして安全にダウンロード
                         file_name="timecard_refined_data.csv",
                         mime="text/csv",
                         use_container_width=True
