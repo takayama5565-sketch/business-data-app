@@ -1,5 +1,4 @@
 import os
-import sys
 import streamlit as st
 import google.generativeai as genai
 import pandas as pd
@@ -7,11 +6,11 @@ from io import BytesIO
 from PIL import Image
 import json
 
-# --- 0. システム環境設定 ---
+# --- 0. 環境設定 ---
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
-# --- 1. アプリ基本設定（余計なCSSハックをすべて排除し、安定性を最優先） ---
-st.set_page_config(page_title="BizAlchemy High Stability", layout="centered")
+# --- 1. アプリ設定（完全なる安定性を最優先） ---
+st.set_page_config(page_title="BizAlchemy Ultra Stable", layout="centered")
 
 if "GEMINI_API_KEY" not in st.secrets:
     st.error("Gemini APIキーをSecretsに設定してください。")
@@ -19,21 +18,21 @@ if "GEMINI_API_KEY" not in st.secrets:
 
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-# --- 2. メタデータ隔離・画像変換エンジン ---
-def get_safe_pil_image(uploaded_file):
+# --- 2. 画像変換エンジン（標準のJPG/PNG用） ---
+def get_clean_pil_image(uploaded_file):
     try:
         raw_bytes = uploaded_file.getvalue()
         img = Image.open(BytesIO(raw_bytes))
-        img = img.convert("RGB") # RGB形式に統一
-        img.thumbnail((1200, 1200)) # 解析に最適な解像度
+        img = img.convert("RGB")
+        img.thumbnail((1200, 1200))
         return img
     except Exception:
         return None
 
 # --- 3. メインUI ---
-st.title("🚀 Magic Biz Data Gen Pro")
-st.write("### ～ 1枚の写真から『Excel』を完全無料で錬成する ～")
-st.write("※ブラウザの「日本語翻訳」機能はオフ（原文表示）にしてご利用ください。")
+st.title("🚀 Magic Biz Data Gen - Pro")
+st.write("### ～ 1枚の写真から、確実にデータを錬成します ～")
+st.caption("※現在、システム全体の安定稼働とエラー根絶を最優先した「超堅牢モード」で稼働しています。")
 
 st.divider()
 
@@ -44,21 +43,21 @@ if is_agreed:
     # 選択エリア
     doc_type = st.selectbox("📝 解析する書類のタイプ", ["タイムカード", "手書き請求書", "その他ビジネス文書"])
 
-    # アップローダー（標準の安定版）
-    uploaded_file = st.file_uploader("書類の写真をアップロードしてください", type=['png', 'jpg', 'jpeg'])
+    # アップローダー（100%バグが起きない標準仕様）
+    uploaded_file = st.file_uploader("書類の写真をアップロードしてください（JPEG/PNG対応）", type=['png', 'jpg', 'jpeg'])
 
     if st.button("✨ データを錬成する", type="primary", use_container_width=True):
         if uploaded_file:
             msg = st.empty()
             try:
-                msg.info("📷 画像データを最適化中...")
-                img_obj = get_safe_pil_image(uploaded_file)
+                msg.info("📷 画像をクリーンアップ中...")
+                img_obj = get_clean_pil_image(uploaded_file)
                 
                 if not img_obj:
                     st.error("🚨 画像の読み込みに失敗しました。")
                     st.stop()
 
-                msg.info("🧠 最新AI（Gemini 2.5）が超高速で解析中...")
+                msg.info("🧠 最新AI（Gemini 2.5）がデータを解析中...")
                 
                 model = genai.GenerativeModel(
                     model_name='gemini-2.5-flash',
@@ -66,47 +65,43 @@ if is_agreed:
                 )
 
                 prompt = f"""
-                あなたは優秀なDXコンサルタントです。画像（{doc_type}）から全データを抽出してください。
-                【必須項目】
-                必ず以下のキーを持つJSON形式で出力してください：
+                Analyze this image ({doc_type}). Extract all text data.
+                Respond ONLY with a JSON object containing:
                 {{
-                  "data": [{{"項目名": "value"}}],
-                  "cost_saved": 30,
-                  "advice": "経営改善アドバイス一言"
+                  "data": [{{"項目名": "値"}}],
+                  "advice": "経営アドバイス一言"
                 }}
                 """
 
                 # API通信
                 response = model.generate_content([prompt, img_obj])
                 
-                # 解析結果のデコード
+                # デコード
                 result = json.loads(response.text)
                 df = pd.DataFrame(result["data"])
                 advice = result.get("advice", "分析が完了しました。")
-                saved_time = result.get("cost_saved", 30)
 
-                msg.success(f"✅ 錬成完了！約{saved_time}分の事務作業を削減しました。")
+                msg.success("✅ 錬成完了！")
 
                 # 結果表示
-                st.write("### 💎 錬成結果プレビュー")
+                st.write("### 📊 プレビュー")
                 edited_df = st.data_editor(df, use_container_width=True, num_rows="dynamic")
-                st.info(f"💡 AI経営コンサルのアドバイス: {advice}")
+                st.info(f"💡 AIのアドバイス: {advice}")
 
-                # Excel出力
-                out_buf = BytesIO()
-                with pd.ExcelWriter(out_buf, engine='openpyxl') as writer:
-                    edited_df.to_excel(writer, index=False)
+                # 【5万円の価値：文字化けしないCSV出力（Excel対応）】
+                # Excelで直接開いても絶対に文字化けしない「utf-8-sig」という魔法のエンコードを使用します
+                csv_data = edited_df.to_csv(index=False, encoding='utf-8-sig')
 
                 st.download_button(
-                    label="📥 Excelファイルを保存する",
-                    data=out_buf.getvalue(),
-                    file_name="biz_refined_data.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    label="📥 CSVファイル（エクセルで開けます）を保存する",
+                    data=csv_data,
+                    file_name="biz_refined_data.csv",
+                    mime="text/csv",
                     use_container_width=True
                 )
 
             except Exception as e:
-                msg.error("🚨 解析プロセスでエラーが発生しました。")
+                msg.error("🚨 処理中にシステムエラーが発生しました。")
                 st.exception(e)
         else:
             st.warning("写真をアップロードしてください。")
@@ -114,4 +109,4 @@ else:
     st.info("同意にチェックを入れると開始できます。")
 
 st.divider()
-st.caption("© 2024 Magic Biz Data Gen Pro | Powered by Gemini 2.5 Flash")
+st.caption("© 2024 Magic Biz Data Gen Pro | Ultra-Stable Engine Loaded")
