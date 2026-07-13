@@ -53,10 +53,66 @@ if is_agreed:
                     img.thumbnail((1200, 1200))
 
                     # 2. 【プロ設計】横一列の表形式をAIに強制するプロンプト
-                    prompt = f"""
+                    # f-stringを使わず、普通の文字列にして安全に置き換えます（これで文法エラーを物理的に根絶します）
+                    prompt = """
                     Analyze this image ({doc_type}). Extract the timecard data.
                     You must structure the output as a horizontal database table.
                     Format your response ONLY as a JSON object containing a "data" list.
                     
                     Each item in the "data" list must represent one day's row, with these exact columns:
-                    - "氏名" (Extra
+                    - "氏名" (Extract the name from the top, e.g., "立石 美紀", and repeat it on every row)
+                    - "日付" (e.g., "1日", "2日", "3日")
+                    - "出勤" (e.g., "9:32")
+                    - "退勤" (e.g., "16:04")
+                    - "合計時間" (The calculated work hours from the card, e.g., "6:30")
+                    
+                    Only extract dates that have stamped data. Skip blank rows.
+                    """.replace("{doc_type}", doc_type)
+
+                    # 3. API通信（JSON形式を指定）
+                    response = client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=[prompt, img],
+                        config={
+                            "response_mime_type": "application/json"
+                        }
+                    )
+
+                    # 4. 安全なデータ変換
+                    raw_text = response.text
+                    cleaned_text = clean_json_string(raw_text)
+                    
+                    try:
+                        result = json.loads(cleaned_text)
+                        df = pd.DataFrame(result["data"])
+                        # カラムの順番を人間が見やすいように固定
+                        df = df[["氏名", "日付", "出勤", "退勤", "合計時間"]]
+                    except json.JSONDecodeError:
+                        st.warning("⚠️ データの自動表作成に失敗しました。解析された生データを表示します。")
+                        st.text_area("AIの生データ", raw_text, height=300)
+                        st.stop()
+
+                    st.success("✅ 錬成完了！")
+                    
+                    st.write("### 📊 解析データプレビュー")
+                    st.table(df)
+
+                    # 5. CSVダウンロード（UTF-8-SIG形式でExcelに直通）
+                    csv_data = df.to_csv(index=False, encoding='utf-8-sig')
+
+                    st.download_button(
+                        label="📥 CSVファイル（エクセル対応）を保存する",
+                        data=csv_data,
+                        file_name="timecard_refined_data.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+
+                except Exception as e:
+                    st.error("🚨 処理中にシステムエラーが発生しました。")
+                    st.exception(e)
+else:
+    st.info("同意にチェックを入れると開始できます。")
+
+st.divider()
+st.caption("© 2024 Magic Biz Data Gen Pro | Bulletproof Architecture Engine")
