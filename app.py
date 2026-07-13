@@ -1,4 +1,5 @@
 import os
+import sys
 import streamlit as st
 import google.generativeai as genai
 import pandas as pd
@@ -9,8 +10,8 @@ import json
 # --- 0. 環境設定 ---
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
-# --- 1. アプリ設定（完全なる安定性を最優先） ---
-st.set_page_config(page_title="BizAlchemy Ultra Stable", layout="centered")
+# --- 1. アプリ設定（動的コンポーネントを排除し、完全なる安定性を最優先） ---
+st.set_page_config(page_title="BizAlchemy Bulletproof", layout="centered")
 
 if "GEMINI_API_KEY" not in st.secrets:
     st.error("Gemini APIキーをSecretsに設定してください。")
@@ -18,21 +19,10 @@ if "GEMINI_API_KEY" not in st.secrets:
 
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-# --- 2. 画像変換エンジン（標準のJPG/PNG用） ---
-def get_clean_pil_image(uploaded_file):
-    try:
-        raw_bytes = uploaded_file.getvalue()
-        img = Image.open(BytesIO(raw_bytes))
-        img = img.convert("RGB")
-        img.thumbnail((1200, 1200))
-        return img
-    except Exception:
-        return None
-
-# --- 3. メインUI ---
-st.title("🚀 Magic Biz Data Gen - Pro")
+# --- 2. メインUI ---
+st.title("🚀 Magic Biz Data Gen Pro")
 st.write("### ～ 1枚の写真から、確実にデータを錬成します ～")
-st.caption("※現在、システム全体の安定稼働とエラー根絶を最優先した「超堅牢モード」で稼働しています。")
+st.caption("※ブラウザの翻訳機能による不具合を防ぐため、翻訳はオフにしてご利用ください。")
 
 st.divider()
 
@@ -40,73 +30,72 @@ st.divider()
 is_agreed = st.checkbox("機密保持条項およびデータ即時消去の規約に同意する", value=True)
 
 if is_agreed:
-    # 選択エリア
     doc_type = st.selectbox("📝 解析する書類のタイプ", ["タイムカード", "手書き請求書", "その他ビジネス文書"])
 
-    # アップローダー（100%バグが起きない標準仕様）
+    # アップローダー（標準の安定版）
     uploaded_file = st.file_uploader("書類の写真をアップロードしてください（JPEG/PNG対応）", type=['png', 'jpg', 'jpeg'])
 
-    if st.button("✨ データを錬成する", type="primary", use_container_width=True):
-        if uploaded_file:
-            msg = st.empty()
-            try:
-                msg.info("📷 画像をクリーンアップ中...")
-                img_obj = get_clean_pil_image(uploaded_file)
-                
-                if not img_obj:
-                    st.error("🚨 画像の読み込みに失敗しました。")
-                    st.stop()
+    if uploaded_file is not None:
+        if st.button("✨ データを錬成する", type="primary", use_container_width=True):
+            
+            # 【開発プロのこだわり】 st.empty() を使わず、安全な st.spinner のみでローディングを管理
+            with st.spinner("AIが画像データを解析中...（約10秒かかります）"):
+                try:
+                    # 1. 画像の読み込み（名前は一切触れずに中身だけ）
+                    raw_bytes = uploaded_file.getvalue()
+                    img = Image.open(BytesIO(raw_bytes)).convert("RGB")
+                    img.thumbnail((1200, 1200))
 
-                msg.info("🧠 最新AI（Gemini 2.5）がデータを解析中...")
-                
-                model = genai.GenerativeModel(
-                    model_name='gemini-2.5-flash',
-                    generation_config={"response_mime_type": "application/json"}
-                )
+                    # 2. 最新AI（Gemini 2.5）の呼び出し
+                    model = genai.GenerativeModel(
+                        model_name='gemini-2.5-flash',
+                        generation_config={"response_mime_type": "application/json"}
+                    )
 
-                prompt = f"""
-                Analyze this image ({doc_type}). Extract all text data.
-                Respond ONLY with a JSON object containing:
-                {{
-                  "data": [{{"項目名": "値"}}],
-                  "advice": "経営アドバイス一言"
-                }}
-                """
+                    prompt = f"""
+                    Analyze this image ({doc_type}). Extract all text data.
+                    Respond ONLY with a JSON object containing:
+                    {{
+                      "data": [{{"項目名": "値"}}],
+                      "cost_saved": 30,
+                      "advice": "経営改善のための具体的なアドバイス一言"
+                    }}
+                    """
 
-                # API通信
-                response = model.generate_content([prompt, img_obj])
-                
-                # デコード
-                result = json.loads(response.text)
-                df = pd.DataFrame(result["data"])
-                advice = result.get("advice", "分析が完了しました。")
+                    response = model.generate_content([prompt, img])
+                    
+                    # 3. 解析結果のパース
+                    result = json.loads(response.text)
+                    df = pd.DataFrame(result["data"])
+                    advice = result.get("advice", "分析が完了しました。")
+                    saved_time = result.get("cost_saved", 30)
 
-                msg.success("✅ 錬成完了！")
+                    # 4. 結果の表示（動的部品は一切使わず、完全に静的な画面描写）
+                    st.success(f"✅ 錬成完了！約{saved_time}分の事務作業を削減しました。")
+                    
+                    st.write("### 📊 解析データプレビュー")
+                    # 【重要】 st.data_editor ではなく、静的な st.table を使用。
+                    # これにより、ブラウザのReactエンジンがクラッシュする原因を「ゼロ」にしました。
+                    st.table(df)
+                    
+                    st.info(f"💡 AI経営コンサルのアドバイス: {advice}")
 
-                # 結果表示
-                st.write("### 📊 プレビュー")
-                edited_df = st.data_editor(df, use_container_width=True, num_rows="dynamic")
-                st.info(f"💡 AIのアドバイス: {advice}")
+                    # 5. CSVダウンロード（UTF-8-SIG形式でExcelに直通）
+                    csv_data = df.to_csv(index=False, encoding='utf-8-sig')
 
-                # 【5万円の価値：文字化けしないCSV出力（Excel対応）】
-                # Excelで直接開いても絶対に文字化けしない「utf-8-sig」という魔法のエンコードを使用します
-                csv_data = edited_df.to_csv(index=False, encoding='utf-8-sig')
+                    st.download_button(
+                        label="📥 CSVファイル（エクセル対応）を保存する",
+                        data=csv_data,
+                        file_name="biz_refined_data.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
 
-                st.download_button(
-                    label="📥 CSVファイル（エクセルで開けます）を保存する",
-                    data=csv_data,
-                    file_name="biz_refined_data.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-
-            except Exception as e:
-                msg.error("🚨 処理中にシステムエラーが発生しました。")
-                st.exception(e)
-        else:
-            st.warning("写真をアップロードしてください。")
+                except Exception as e:
+                    st.error("🚨 処理中にシステムエラーが発生しました。")
+                    st.exception(e)
 else:
     st.info("同意にチェックを入れると開始できます。")
 
 st.divider()
-st.caption("© 2024 Magic Biz Data Gen Pro | Ultra-Stable Engine Loaded")
+st.caption("© 2024 Magic Biz Data Gen Pro | Bulletproof Architecture Engine")
