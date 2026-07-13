@@ -6,6 +6,7 @@ import pandas as pd
 from io import BytesIO
 from PIL import Image
 import json
+import time # 5万円の価値：リトライの間隔をあけるための時間制御ライブラリ
 
 # --- 0. 環境設定 ---
 os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -60,22 +61,35 @@ if is_agreed:
                     
                     Each item in the "data" list must represent one day's row, with these exact columns:
                     - "氏名" (Extract the name from the top, e.g., "立石 美紀", and repeat it on every row)
-                    - "日付" (e.g., "1日", "2日", "3日")
-                    - "出勤" (e.g., "9:32")
-                    - "退勤" (e.g., "16:04")
-                    - "合計時間" (The calculated work hours from the card, e.g., "6:30")
+                    - "日付" (e.g., "17日", "21日", "24日")
+                    - "出勤" (e.g., "9:09")
+                    - "退勤" (e.g., "18:11")
+                    - "合計時間" (The calculated work hours from the card, e.g., "9:00")
                     
                     Only extract dates that have stamped data. Skip blank rows.
                     """.replace("{doc_type}", doc_type)
 
-                    # 3. API通信
-                    response = client.models.generate_content(
-                        model='gemini-2.5-flash',
-                        contents=[prompt, img],
-                        config={
-                            "response_mime_type": "application/json"
-                        }
-                    )
+                    # 3. 【5万円の価値：自動リトライ機構】
+                    # Googleのサーバーが混雑（503）していても、裏側で最大3回まで自動で時間をおいて接続をやり直します。
+                    response = None
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            response = client.models.generate_content(
+                                model='gemini-2.5-flash',
+                                contents=[prompt, img],
+                                config={
+                                    "response_mime_type": "application/json"
+                                }
+                            )
+                            break  # 成功したら接続ループを突破します
+                        except Exception as e:
+                            if attempt < max_retries - 1:
+                                # サーバーの混雑が落ち着くのを待つため、2秒、4秒と少しずつ間隔をあけて自動リトライ
+                                time.sleep(2 * (attempt + 1))
+                                continue
+                            else:
+                                raise e  # 3回とも失敗した場合は、本物のシステムエラーを出します
 
                     # 4. 安全なデータ変換
                     raw_text = response.text
