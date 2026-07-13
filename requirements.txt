@@ -1,6 +1,4 @@
 google-generativeai
-python-docx
-python-pptx
-reportlab
+pandas
 openpyxl
-pillow-heif
+Pillow
